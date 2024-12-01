@@ -1,4 +1,4 @@
-data*
+data/processed_plain
 save*
 *.png
 visual*
