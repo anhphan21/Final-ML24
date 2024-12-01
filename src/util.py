@@ -1,8 +1,6 @@
 import torch
 from torch_scatter import scatter
 from tqdm import tqdm
-import pylab
-import os.path as osp
 import os
 import numpy as np
 import scipy.stats as stats

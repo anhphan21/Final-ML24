@@ -135,7 +135,7 @@ model = build_model()
 # os.makedirs('log/{}'.format(args.checkp), exist_ok=True)
 # logger = writer.SummaryWriter('log/{}'.format(args.checkp))
 
-checkp = torch.load(args.checkp, map_location='cuda')
+checkp = torch.load(args.checkp, map_location=args.device)
 model.load_state_dict(checkp['model'])
 model = model.to(args.device)
 #print('load model from {}, loss = {}, err = {}'.format(args.checkp,checkp['val_loss'], checkp['rank_err']))

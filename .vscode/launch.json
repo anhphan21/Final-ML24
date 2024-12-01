@@ -1,0 +1,25 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "args": [
+                "--model",
+                "CNN",
+                "--checkp",
+                "data/checkp/CNN_[1]_0/last.pth",
+                "--label",
+                "1",
+                "--group",
+                "0"
+            ],
+            "program": "${file}",
+            "console": "integratedTerminal"
+        }
+    ]
+}
