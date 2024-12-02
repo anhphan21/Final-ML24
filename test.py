@@ -7,22 +7,17 @@ import os
 import time
 import random
 import numpy as np
-from tqdm import tqdm
 from torch.utils.data import Subset
-import pdb
 import sys
-#import swats
 import src.hyperdataset as hdatasets
 import src.hypermodel as hmodels
 from src.logger import Logger
 from torch_geometric.loader import DataLoader
 from src.util import InversePairs, kendall, mykendall
-#from torch.utils.tensorboard import writer
-import matplotlib.pyplot as plt 
-parser = argparse.ArgumentParser()
 
-parser.add_argument('--seed', type=int, default=777, help='seed')
-parser.add_argument('--device', type=str, default='cuda:0',help='device')
+parser = argparse.ArgumentParser() 
+parser.add_argument('--seed', type=int, default=212, help='seed')
+parser.add_argument('--device', type=str, default='cpu',help='device')
 parser.add_argument('--model', type=str, default='GClassifier',help='which mdoel to use')
 parser.add_argument('--batch_size', type=int, default=8,help='train batch size')
 parser.add_argument('--batch_step', type=int, default=1,help='how many batches per update')
@@ -128,7 +123,7 @@ if args.group == 1:
 label = [int(i) for i in args.label][0]
 set_seed(args.seed)
 # build up
-# print('loading dataset ...')
+print('loading dataset ...')
 dataset, loader = build_test_loader()
 model = build_model()
 
