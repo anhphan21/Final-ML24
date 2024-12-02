@@ -324,8 +324,7 @@ class EGNNet(torch.nn.Module):
 
 
 class HGNN(torch.nn.Module):
-    """plain gnn baseline"""
-
+    """plain HGCL baseline"""
     def __init__(self, args=None):
         super(HGNN, self).__init__()
         self.args = args

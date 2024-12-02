@@ -4,6 +4,7 @@ from tqdm import tqdm
 import os
 import numpy as np
 import scipy.stats as stats
+import torch.nn.functional as F
 
 
 def position_encoding(position: torch.Tensor, L: int = 4) -> torch.Tensor:
@@ -304,15 +305,17 @@ def mean_dist(data):
     dist = dist.view(n, -1)
     return torch.mean(dist, dim=-1).view(-1, 1)
 
-def measure_similarity(node_features):
-    # Compute pairwise cosine similarity
-    norm_features = torch.nn.functional.normalize(node_features, p=2, dim=1)  # Normalize along feature dim
-    similarity_matrix = torch.matmul(norm_features, norm_features.T)
-    
-    # Check mean similarity (excluding diagonal elements)
+
+def measure_similarity(features):
+    """
+    Compute the mean pairwise cosine similarity between node features.
+    """
+    normalized_features = F.normalize(features, p=2, dim=-1)  # Normalize the features
+    similarity_matrix = torch.matmul(normalized_features, normalized_features.T)
     num_nodes = similarity_matrix.size(0)
     mean_similarity = (similarity_matrix.sum() - num_nodes) / (num_nodes * (num_nodes - 1))
-    return mean_similarity
+    return mean_similarity.item()
+
 
 if __name__ == "__main__":
     a = torch.randn(5, 10)
