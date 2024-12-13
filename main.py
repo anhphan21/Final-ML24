@@ -23,8 +23,8 @@ from src.util import InversePairs, mle_loss, spearman, dcg_score
 #from src.meta import META
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--seed', type=int, default=777, help='seed')
-parser.add_argument('--device', type=str, default='cuda:0',help='device')
+parser.add_argument('--seed', type=int, default=212, help='seed')
+parser.add_argument('--device', type=str, default='cpu',help='device')
 parser.add_argument('--model', type=str, default='GClassifier',help='which mdoel to use')
 parser.add_argument('--batch_size', type=int, default=8,help='train batch size')
 parser.add_argument('--batch_step', type=int, default=1,help='how many batches per update')
@@ -70,7 +70,7 @@ args = parser.parse_args()
 args.betas = [0.005, ]
 
 def set_seed(seed):
-    random.seed(seed)
+    # random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -322,7 +322,7 @@ def build_log():
 
 
 # preparing
-torch.set_num_threads(16)
+torch.set_num_threads(32)
 
 # choose data group
 if args.group == 1: 
@@ -337,7 +337,7 @@ if args.model == 'RClassifier':
     args.acc = 'COMB'
 
 args.label = [int(i) for i in args.label]
-set_seed(args.seed)
+set_seed(212)
 # build up
 best_model_path, last_model_path, logger = build_log()
 print('loading dataset ...')

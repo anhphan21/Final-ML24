@@ -11,7 +11,7 @@ from torch import Tensor, dropout
 from torch_scatter import scatter, scatter_mean
 import torch.nn as nn
 from torchvision import models
-import egnn as egnn_models
+import src.egnn as egnn_models
 from torch.nn.utils.rnn import pad_sequence
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -33,16 +33,14 @@ def unpad_sequence(padded_sequences, masks):
 
     return unpadded_sequences
 
-
+# Reference [11]: network structure follow the paper
 class CNN(torch.nn.Module):
-    """cnn baseline"""
+    """Reference [11] + LTR"""
 
-    def __init__(self, args):
+    def __init__(self, settings):
         super(CNN, self).__init__()
-        self.args = args
-        self.dropout = args.dropout_ratio
-        self.num_classes = 1
-        self.net = models.vgg11(pretrained=True)
+        self.dropout = settings.dropout_ratio
+        self.net = models.vgg16(pretrained=True)
         self.net.classifier = nn.Sequential(
             nn.Linear(512 * 7 * 7, 4096),
             nn.ReLU(True),
@@ -55,85 +53,52 @@ class CNN(torch.nn.Module):
             nn.Dropout(self.dropout),
             nn.Linear(1000, 1),
         )
-
-    def forward(self, data):
-        x = data.density
-        x = self.net(x)
-        return x.view(-1)
-
-    def predict(self, data):
-        x = data.density
-        x = self.net(x)
-        return x.view(-1)
-
-
-class RClassifier(torch.nn.Module):
-    """cnn baseline"""
-
-    def __init__(self, args):
-        super(RClassifier, self).__init__()
-        self.args = args
-        self.num_classes = 1
-        self.dropout = args.dropout_ratio
-        self.net = models.vgg11(pretrained=True)
-        self.net.classifier = nn.Sequential(
-            nn.Linear(512 * 7 * 7, 4096),
-            nn.ReLU(True),
-            nn.Dropout(self.dropout),
-            nn.Linear(4096, 1),
-        )
-
         self.out = nn.Sigmoid()
 
     def forward(self, data):
-        x = data.density
-        x = self.net(x)
-        return x.view(-1)
-
-    def predict(self, data):
-        x = data.density
-        return self.net(x).view(-1)
-
-
-class Classifier(torch.nn.Module):
-    """cnn baseline"""
-
-    def __init__(self, args):
-        super(Classifier, self).__init__()
-        self.args = args
-        self.num_classes = 1
-        self.dropout = args.dropout_ratio
-        self.net = models.vgg11(pretrained=False)
-        self.net.classifier = nn.Sequential(
-            nn.Linear(512 * 7 * 7, 4096),
-            nn.ReLU(True),
-            nn.Dropout(self.dropout),
-            nn.Linear(4096, 1),
-        )
-
-        self.out = nn.Sigmoid()
-
-    def forward(self, data):
-        x = data.density
+        x = self.net(data.density)
         index = torch.arange(0, x.shape[0], 2).to(x.device)
         x0 = torch.index_select(x, dim=0, index=index)
         x1 = torch.index_select(x, dim=0, index=(index + 1))
         s0 = self.net(x0)
         s1 = self.net(x1)
-
-        x = self.out(s0 - s1)
+        x  = self.out(s0 - s1)
         return x.view(-1)
 
     def predict(self, data):
-        x = data.density
-        return self.net(x).view(-1)
+        x = self.net(data.density)
+        return x.view(-1)
 
 
-class GClassifier(torch.nn.Module):
+class CNN_ResNET(torch.nn.Module):
+    """CNN with ResNet50 no_modified + LTR"""
+
+    def __init__(self, settings):
+        super(CNN, self).__init__()
+        self.dropout = settings.dropout_ratio
+        self.net = models.resnet50(pretrained=False)
+        self.out = nn.Sigmoid()
+
+    def forward(self, data):
+        x = self.net(data.density)
+        index = torch.arange(0, x.shape[0], 2).to(x.device)
+        x0 = torch.index_select(x, dim=0, index=index)
+        x1 = torch.index_select(x, dim=0, index=(index + 1))
+        s0 = self.net(x0)
+        s1 = self.net(x1)
+        x  = self.out(s0 - s1)
+        return x.view(-1)
+
+    def predict(self, data):
+        x = self.net(data.density)
+        return x.view(-1)
+
+
+class MacroRank(torch.nn.Module):
     """gnn baseline"""
 
     def __init__(self, args):
-        super(GClassifier, self).__init__()
+        super(MacroRank, self).__init__()
         self.args = args
         self.net = EHGNN(args=args)
         self.out = nn.Sigmoid()
@@ -256,7 +221,7 @@ class EGNNet(torch.nn.Module):
         )
         self.convs = nn.ModuleList([])
 
-        base_model = getattr(egnn_models, args.base_model)
+        base_model = getattr(egnn_models, "EGNN")
         for i in range(layers):
             self.convs.append(
                 base_model(
@@ -290,20 +255,6 @@ class EGNNet(torch.nn.Module):
     ):
         if self.embedd is not None:
             feat_ = self.embedd(feat_)
-        # if batch.max() <= 200 :
-        #     feats = split_batch(feat_, batch)
-        #     feats = pad_sequence(feats, batch_first=True)
-        #     coors = split_batch(coor_, batch)
-        #     coors = pad_sequence(coors, batch_first=True)
-        #     masks = split_batch(feat_.new_ones(feat_.shape[0], dtype=bool), batch)
-        #     masks = pad_sequence(masks, batch_first=True)
-
-        #     for i, conv in enumerate(self.convs):
-        #         feats, coors = conv(feats, coors, mask=masks)
-
-        #     feats = unpad_sequence(feats, masks)
-        #     feats = torch.cat(feats, dim=0)
-        # else:
         feats = split_batch(feat_, batch)
         coors = split_batch(coor_, batch)
         feats = [p.view(1, -1, self.feat_dim) for p in feats]
@@ -383,7 +334,7 @@ class HGNN(torch.nn.Module):
             x, pin_feat = self.convs[i](x, pin_feat, edge_index, edge_weight)
             if self.skip_cnt and i > 0:
                 x, pin_feat = x + last_x, pin_feat + last_pin_feat
-        #
+        
         macro_feature = x[macro_index]
         x = torch.cat([gap(macro_feature, macro_batch), gap(x, batch)], dim=-1)
         # mlp
@@ -392,8 +343,6 @@ class HGNN(torch.nn.Module):
 
 
 class EHGNN(torch.nn.Module):
-    """egnn + gnn"""
-
     def __init__(self, args=None):
         super(EHGNN, self).__init__()
         self.args = args
@@ -496,105 +445,5 @@ class EHGNN(torch.nn.Module):
         feat = self.posnet(macro_feature, macro_pos, data.macro_num)
         # mlp
         x = gap(feat, macro_batch)
-        x = self.mlp(x)
-        return x
-
-
-class CEHGNN(torch.nn.Module):
-    """plain gnn baseline"""
-
-    def __init__(self, args=None):
-        super(CEHGNN, self).__init__()
-        self.args = args
-        self.out_ch = 1
-        self.num_node_features = args.num_node_features
-        self.num_pin_features = args.num_pin_features
-        self.num_edge_features = args.num_edge_features
-        self.nhid = args.nhid
-        self.negative_slope = 0.1
-        self.dropout_ratio = args.dropout_ratio
-        self.conv_layers = args.layers
-        self.skip_cnt = args.skip_cnt
-        self.pos_encode = args.pos_encode
-        self.pos_dim = 4
-        self.num_egnn = args.egnn_layers
-        self.egnn_dim = args.egnn_nhid
-
-        self.convs = nn.ModuleList(
-            [
-                HyperGATConv(
-                    in_nch=self.num_node_features,
-                    in_pch=self.num_pin_features,
-                    in_ech=self.num_edge_features,
-                    nhid=self.nhid,
-                    out_ch=self.nhid,
-                    dropout=self.dropout_ratio,
-                )
-            ]
-        )
-        for i in range(self.conv_layers - 1):
-            self.convs.append(
-                HyperGATConv(
-                    in_nch=self.nhid,
-                    in_pch=self.nhid,
-                    in_ech=self.num_edge_features,
-                    nhid=self.nhid,
-                    out_ch=self.nhid,
-                    dropout=self.dropout_ratio,
-                )
-            )
-
-        self.posnet = EGNNet(
-            self.num_egnn,
-            self.nhid,
-            self.pos_dim,
-            self.egnn_dim,
-            position_encoding=self.pos_encode,
-            dropout=self.dropout_ratio,
-            args=args,
-        )
-
-        self.net = models.vgg11(pretrained=True)
-        self.net.classifier = nn.Sequential(
-            nn.Dropout(self.dropout_ratio),
-            nn.Linear(512 * 7 * 7, self.egnn_dim),
-            nn.ReLU(True),
-        )
-
-        self.mlp = nn.Sequential(
-            nn.Linear(self.egnn_dim * 2, self.nhid),
-            nn.LeakyReLU(negative_slope=self.negative_slope),
-            nn.Dropout(p=self.dropout_ratio),
-            nn.Linear(self.nhid, self.nhid),
-            nn.LeakyReLU(negative_slope=self.negative_slope),
-            nn.Linear(self.nhid, self.out_ch),
-        )
-
-    def forward(self, data):
-
-        x, edge_index = data.x, data.edge_index
-        pin_feat, edge_weight = data.pin_offset, data.edge_weight
-        batch, macro_index = data.batch, data.macro_index
-        density = data.pic
-        # add macro pos
-        macro_batch = batch[macro_index]
-        macro_pos = data.macro_pos
-        # model forward
-        for i, conv in enumerate(self.convs):
-            last_x, last_pin_feat = x, pin_feat
-            x, pin_feat = conv(x, pin_feat, edge_index, edge_weight)
-            if self.skip_cnt and i > 0:
-                x, pin_feat = x + last_x, pin_feat + last_pin_feat
-        #
-        macro_feature = x[macro_index]
-        x = torch.cat([gap(macro_feature, macro_batch), gap(x, batch)], dim=-1)
-        # EGNN for position feature
-        feat = self.posnet(macro_feature, macro_pos, data.macro_num)
-        # mlp
-        # x = torch.cat([x, gap(feat, macro_batch)], dim=-1)
-        feat = gap(feat, macro_batch)
-        # density feature
-        density_feat = self.net(density)
-        x = torch.cat([feat, density_feat], dim=-1)
         x = self.mlp(x)
         return x

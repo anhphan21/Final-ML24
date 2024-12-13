@@ -5,43 +5,40 @@ import numpy as np
 from torch_scatter import scatter
 from torch_geometric.data import Dataset, Data
 from tqdm import tqdm
-from src.util import mean_dist, position_encoding, draw_rect, get_ensity_map
+from src.utl import mean_dist, position_encoding, draw_rect, get_density_map
 
 
 class BipartiteData(Data):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def __inc__(self, key, value, *args, **kwargs):
-        if key == "edge_index":
-            return torch.tensor([[self.x.size(0)], [self.edge_weight.size(0)]])
-        else:
-            return super().__inc__(key, value, *args, **kwargs)
+    # def __inc__(self, key, value, *args, **kwargs):
+    #     if key == "edge_index":
+    #         return torch.tensor([[self.x.size(0)], [self.edge_weight.size(0)]])
+    #     else:
+    #         return super().__inc__(key, value, *args, **kwargs)
 
 
 class PlainClusterSet(Dataset):
     def __init__(
         self,
         root,
+        settings=None,
         transform=None,
         pre_transform=None,
-        mode="graph",
         pos_encoding=True,
-        test_files=["mgc_fft_a", "mgc_matrix_mult_b"],
-        train_files=["mgc_fft_b"],
-        device="cpu",
-        args=None,
     ):
-        self.args = args
+        self.args = settings
+        self.data_path = root
         self.tot_file_num = None  # int
         self.file_num = None  # dict, file nums for each design
         self.ptr = None
         self.num_bins = 224
         self.bin_size = 1.0 / 224
-        self.train_file_names = train_files
-        self.test_file_names = test_files
-        self.device = device
-        self.mode = mode
+        self.train_file_names = settings.train_design
+        self.test_file_names = settings.test_design
+        self.device = settings.device
+        self.mode = settings.model
         self.pos_encoding = pos_encoding
         # info
         self.labels = ["hpwl", "rwl", "vias", "short", "score"]
@@ -68,18 +65,18 @@ class PlainClusterSet(Dataset):
             self.origin[design] = []
             self.netlist[design] = torch.load(
                 osp.join(self.processed_dir, "{}.pt".format(design))
-            ).to(device)
+            ).to(self.device)
 
         for i in range(len(self.processed_file_names)):
-            self.data.append(self.pre_load_data(i).to(device))
+            self.data.append(self.pre_load_data(i).to(self.device))
 
     @property
     def processed_dir(self) -> str:
-        return osp.join(self.root, "processed_plain")
+        return osp.join(self.data_path, "processed_plain")
 
     @property
     def raw_file_names(self):
-        names_path = osp.join(self.root, "raw", "all.names")
+        names_path = osp.join(self.data_path, "raw", "all.names")
         names = np.loadtxt(names_path, dtype=str)
         if names.ndim == 0:
             return [str(names)]
@@ -262,7 +259,7 @@ class PlainClusterSet(Dataset):
                 fake_pos = torch.zeros_like(node_pos)
                 fake_pos[macro_index] = node_pos[macro_index]
                 # density map
-                pic = get_ensity_map(
+                pic = get_density_map(
                     macro_index,
                     self.num_bins,
                     self.bin_size,
@@ -370,49 +367,13 @@ class PlainClusterSet(Dataset):
         self.origin[design].append(data.y)
         # normalize
         y = self.y[:, idx].view(1, -1)
-        if self.mode == "HGNN":
-            w = self.weight[design].view(1, -1)
-            size = netlist.node_attr[:, 2]
-            pe = position_encoding(data.pos)
-            x = torch.cat([pe, netlist.node_attr], dim=-1)
-            bipartdata = BipartiteData(
-                x=x,
-                edge_index=netlist.edge_index,
-                y=y,
-                pic=data.pic,
-                edge_weight=netlist.edge_weight,
-                pin_offset=netlist.pin_offset,
-                macro_index=netlist.macro_index,
-                design=design,
-                w=w,
-            )
-        elif self.mode == "EHGNN" or self.mode == "CEHGNN":
-            w = self.weight[design].view(1, -1)
-            size = netlist.node_attr[netlist.macro_index, :2]
-            pos = data.pos[netlist.macro_index]
-            d4pos = torch.cat([pos, pos + size], dim=-1)
-            x = netlist.node_attr
-            offset = netlist.pin_offset
-            bipartdata = BipartiteData(
-                x=x,
-                edge_index=netlist.edge_index,
-                y=y,
-                pic=data.pic,
-                edge_weight=netlist.edge_weight,
-                pin_offset=offset,
-                macro_index=netlist.macro_index,
-                design=design,
-                w=w,
-                macro_num=netlist.macro_index.shape[0],
-                macro_pos=d4pos,
-            )
-        elif self.mode == "CNN":
+        if self.mode == "CNN":
             w = self.weight[design].view(1, -1)
             bipartdata = Data(y=y, density=data.pic, design=design, w=w)
         elif self.mode == "Classifier" or self.mode == "RClassifier":
             w = self.weight[design].view(1, -1)
             bipartdata = Data(y=y, density=data.pic, design=design, w=w)
-        elif self.mode == "GClassifier":
+        elif self.mode == "GNN":
             w = self.weight[design].view(1, -1)
             size = netlist.node_attr[netlist.macro_index, :2]
             pos = data.pos[netlist.macro_index]
@@ -464,7 +425,7 @@ class PlainClusterSet(Dataset):
                 w2=data2.w,
             )
             return bidata
-        elif self.mode == "GClassifier":
+        elif self.mode == "GNN":
             # select data
             design = self.data[idx].design
             begin = self.ptr[design]
