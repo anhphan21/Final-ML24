@@ -1,9 +1,11 @@
 data/processed_plain
 save*
 *.png
+*.jpg
 visual*
 nohup.out
 read*
 __pychache__
 
 checkp/
+data/

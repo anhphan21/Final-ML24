@@ -15,15 +15,16 @@ import torch_optimizer as optim
 from torch.utils.data import random_split, Subset, ConcatDataset
 from torch.utils.tensorboard import writer
 
+
 import src.hyperdataset as hdatasets
 import src.hypermodel as hmodels
 from src.logger import Logger
-from src.util import InversePairs, mle_loss, spearman, dcg_score
+from src.util import InversePairs, mle_loss, spearman, dcg_score, mykendall
 
 #from src.meta import META
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--seed', type=int, default=212, help='seed')
+parser.add_argument('--seed', type=int, default=777, help='seed')
 parser.add_argument('--device', type=str, default='cpu',help='device')
 parser.add_argument('--model', type=str, default='GClassifier',help='which mdoel to use')
 parser.add_argument('--batch_size', type=int, default=8,help='train batch size')
@@ -37,13 +38,16 @@ parser.add_argument('--nhid', type=int, default=16, help='hidden size')
 parser.add_argument('--layers',type=int,default=2,help='conv layers')
 parser.add_argument('--egnn_layers',type=int,default=3,help='egnn layers')
 parser.add_argument('--egnn_nhid',type=int,default=16,help='egnn layers hidden dim')
-#parser.add_argument('--pooling_ratio', type=float, default=0.1,help='pooling ratio')
 parser.add_argument('--dropout_ratio', type=float, default=0.1,help='dropout ratio')
 parser.add_argument('--group', type=int, default=0, help='which data group to use')
+# parser.add_argument('--tests', type=str, nargs='+', 
+#     default=['mgc_des_perf_a', 'mgc_fft_a', 'mgc_matrix_mult_a', 'mgc_matrix_mult_c', 'mgc_superblue14', 'mgc_superblue19'],help='test data')
+# parser.add_argument('--trains', type=str, nargs='+', 
+#     default=['mgc_edit_dist_a', 'mgc_fft_b', 'mgc_matrix_mult_b', 'mgc_pci_bridge32_b', 'mgc_superblue11_a', 'mgc_superblue16_a'],help='train data')
 parser.add_argument('--tests', type=str, nargs='+', 
-    default=['mgc_des_perf_a', 'mgc_fft_a', 'mgc_matrix_mult_a', 'mgc_matrix_mult_c', 'mgc_superblue14', 'mgc_superblue19'],help='test data')
+    default=['mgc_des_perf_a', 'mgc_fft_a', 'mgc_matrix_mult_a'],help='test data')
 parser.add_argument('--trains', type=str, nargs='+', 
-    default=['mgc_edit_dist_a', 'mgc_fft_b', 'mgc_matrix_mult_b', 'mgc_pci_bridge32_b', 'mgc_superblue11_a', 'mgc_superblue16_a'],help='train data')
+    default=['mgc_fft_a', 'mgc_fft_b'],help='train data')
 parser.add_argument('--dataset_path', type=str, default='data')
 parser.add_argument('--dataset', type=str, default='PlainClusterSet')
 parser.add_argument('--epochs', type=int, default=400,help='maximum number of epochs')
@@ -69,12 +73,12 @@ parser.add_argument('--optimizer',type=str,default='Adam')
 args = parser.parse_args()
 args.betas = [0.005, ]
 
-def set_seed(seed):
-    # random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.cuda.manual_seed(seed)
+# def set_seed(seed):
+#     random.seed(seed)
+#     # np.random.seed(seed)
+#     torch.manual_seed(seed)
+#     torch.cuda.manual_seed_all(seed)
+#     torch.cuda.manual_seed(seed)
 
 def build_loss(args):
     def MAELoss(out,data):
@@ -279,7 +283,12 @@ def build_loader(design,train_ratio=0.8):
         print("Total %d training data, %d testing data."%(num_training,num_testing),flush=True)
         train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True)
         test_loader[design] = DataLoader(test_set,batch_size=args.test_batch_size,shuffle=False)
-    return dataset, train_loader, test_loader
+
+    loader = {}
+    for design in dataset.raw_file_names:
+        design_set = Subset(dataset, range(dataset.ptr[design], dataset.ptr[design] + dataset.file_num[design]))
+    loader[design] = DataLoader(design_set, batch_size=1)
+    return dataset, train_loader, test_loader, loader
 
 
 def build_model():
@@ -322,7 +331,7 @@ def build_log():
 
 
 # preparing
-torch.set_num_threads(32)
+torch.set_num_threads(16)
 
 # choose data group
 if args.group == 1: 
@@ -337,11 +346,11 @@ if args.model == 'RClassifier':
     args.acc = 'COMB'
 
 args.label = [int(i) for i in args.label]
-set_seed(212)
+# set_seed(args.seed)
 # build up
 best_model_path, last_model_path, logger = build_log()
 print('loading dataset ...')
-dataset, train_loader, test_loader = build_loader(args.design, args.train_ratio)
+dataset, train_loader, test_loader, final_test = build_loader(args.design, args.train_ratio)
 model, optimizer, schedule = build_model()
 criterion = build_loss(args)
 accuracy = build_acc(args)
@@ -494,3 +503,58 @@ for epoch in range(start, args.epochs):
 state = {'model': model.state_dict(), 'val_loss' : mean_val_loss, 'rank_err' : mean_rank_err}
 torch.save(state, last_model_path)
 
+
+
+print("=====================================================================================================")
+print("Test on all designs")
+
+all_designs = dataset.raw_file_names
+
+dataset.mode = "CNN"
+label = 1
+mres = 0
+taut = 0
+score = 0
+print("model =", args.model)
+print("{:20}\t{:10}\t{:10}\t{}\t{}".format("design", "mean_score", "top30_score", "mre", "tau"))
+with torch.no_grad():
+    designs = []
+    embdds = []
+    model.eval()
+    for design in all_designs:
+        test_loader = final_test[design]
+        preds = []
+        reals = []
+        origins = []
+        # print(design, end='\t\t')
+        label_p = "data/raw/{}/labels.txt".format(design)
+        idx_p = "data/raw/{}/names.txt".format(design)
+
+        labels_this = np.loadtxt(label_p)[np.loadtxt(idx_p, dtype=int)]
+        # pdb.set_trace()
+        for i, data in enumerate(test_loader):
+            data = data.to(args.device)
+            out = model.predict(data)
+            # out = out * (maxx[label - 1] - minn[label - 1]) + meann[label - 1]
+            # data.y[:, 1 : ] =  data.y[:, 1 : ].cuda() * (maxx - minn) + meann
+            reals.append(data.y[:, label].view(-1).item())
+            origins.append(dataset.origin[design][i][:, label].item())
+            preds.append(out.view(-1).item())
+        reals = np.array(reals)
+        preds = np.array(preds)
+        origins = np.array(origins)
+        mre = np.mean(np.abs(reals - preds) / np.abs(reals))
+        tau = mykendall(reals, preds)
+        taut += tau / 12
+        mres += mre / 12
+        top30 = np.argsort(preds)[:30]
+        top30_score = origins[top30].mean()
+        mean_score = np.mean(origins)
+        score += top30_score / mean_score / 12
+
+        print("{:20}\t{:>10.4f}\t{:>.4f}\t{:>.3f}\t{:>.3f}".format(design, mean_score, top30_score, mre, tau))
+
+    print("{:20}\t{:>10.4f}\t{:>10.4f}\t{:>.3f}\t{:>.3f}".format("average", 1.0, score, mres, taut))
+    # print('average mre = {:.3f}'.format(mres/len(args.tests)), ', tau = {:.3f}'.format(taut/len(args.tests)))
+
+print("=====================================================================================================")

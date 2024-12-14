@@ -44,7 +44,7 @@ parser.add_argument('--patience', type=int, default=400,help='patience for early
 parser.add_argument('--save_dir', type=str, default='save')
 parser.add_argument('--goon', action='store_true',help='continue training')
 parser.add_argument('--con', action='store_true',help='continue training')
-parser.add_argument('--checkp', type=str, default='test.pth')
+parser.add_argument('--checkp', type=str, default='last.pth')
 parser.add_argument('--pos_encode', type=int, default=4, help='whether use pos encoding on position')
 parser.add_argument('--size_encode', type=int, default=0, help='whether use pos encoding on size')
 parser.add_argument('--offset_encode', type=int, default=0, help='whether use pos encoding on offset')
